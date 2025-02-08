@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import abc
 import datetime
 import hashlib
 import json
@@ -9,6 +8,7 @@ import logging
 import uuid
 from argparse import ArgumentParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Dict, Optional
 
 SALT = "Otus"
 ADMIN_LOGIN = "admin"
@@ -36,14 +36,24 @@ GENDERS = {
 }
 
 
-class Field(abc.ABC):
-    def __init__(self, required: bool, nullable: bool = False) -> None:
-        self._required = required
-        self._nullable = nullable
+class Field:
+    """Base field class"""
+
+    def __init__(
+        self, required: bool = False, nullable: bool = True, value: Optional[Any] = None
+    ) -> None:
+        self._required: bool = required
+        self._nullable: bool = nullable
+        self.value: Any = value
+
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__} {self.value}"
 
 
 class CharField(Field):
-    pass
+    def _validate(self, value) -> None:
+        if not isinstance(value, str):
+            raise TypeError(f"{self.__class__.__name__} must be an string")
 
 
 class ArgumentsField(Field):
@@ -74,21 +84,17 @@ class ClientIDsField(Field):
     pass
 
 
-class ClientsInterestsRequest(object):
-    client_ids = ClientIDsField(required=True)
-    date = DateField(required=False, nullable=True)
+class Request:
+    def __init__(self, request: Dict) -> None:
+
+        for field, field_value in self.__class__.__dict__.items():
+            # if not field.startswith("__") and not isinstance(field_value, property):
+            if isinstance(field_value, Field):
+                setattr(self, field, field_value)
+                field_value.value = request.get(field)
 
 
-class OnlineScoreRequest(object):
-    first_name = CharField(required=False, nullable=True)
-    last_name = CharField(required=False, nullable=True)
-    email = EmailField(required=False, nullable=True)
-    phone = PhoneField(required=False, nullable=True)
-    birthday = BirthDayField(required=False, nullable=True)
-    gender = GenderField(required=False, nullable=True)
-
-
-class MethodRequest(object):
+class MethodRequest(Request):
     account = CharField(required=False, nullable=True)
     login = CharField(required=True, nullable=True)
     token = CharField(required=True, nullable=True)
@@ -96,8 +102,25 @@ class MethodRequest(object):
     method = CharField(required=True, nullable=False)
 
     @property
-    def is_admin(self):
+    def is_admin(self) -> bool:
         return self.login == ADMIN_LOGIN
+
+    def __str__(self) -> str:
+        return str(self.__dict__)
+
+
+class ClientsInterestsRequest(Request):
+    client_ids = ClientIDsField(required=True)
+    date = DateField(required=False, nullable=True)
+
+
+class OnlineScoreRequest(Request):
+    first_name = CharField(required=False, nullable=True)
+    last_name = CharField(required=False, nullable=True)
+    email = EmailField(required=False, nullable=True)
+    phone = PhoneField(required=False, nullable=True)
+    birthday = BirthDayField(required=False, nullable=True)
+    gender = GenderField(required=False, nullable=True)
 
 
 def check_auth(request):
@@ -113,7 +136,15 @@ def check_auth(request):
 
 
 def method_handler(request, ctx, store):
-    response, code = None, None
+    methods = {
+        "online_score": OnlineScoreRequest,
+        "clients_interests": ClientsInterestsRequest,
+    }
+    request = MethodRequest(request["body"])
+    arguments = methods.get(request.method.value)(request.arguments.value)
+    logging.info(arguments)
+
+    response, code = {}, 200
     return response, code
 
 
